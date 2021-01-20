@@ -16,7 +16,8 @@ from trac.resource import ResourceNotFound
 from trac.ticket.model import Milestone, Ticket
 from trac.util.datefmt import from_utimestamp
 from trac.util.text import console_print, exception_to_unicode, print_table
-from trac.versioncontrol.api import Changeset, RepositoryManager
+from trac.versioncontrol.api import (Changeset, NoSuchChangeset,
+                                     RepositoryManager)
 from trac.versioncontrol.cache import CachedRepository
 from trac.wiki.model import WikiPage
 
@@ -143,6 +144,10 @@ class TracDbftsCommandProvider(Component):
                 WHERE repos=%s
                 """, (repos.id,))
             for rev, date, author, message in cursor:
+                try:
+                    repos.normalize_rev(rev)
+                except NoSuchChangeset:
+                    continue
                 yield Changeset(repos, rev, message, author,
                                 from_utimestamp(date))
 
