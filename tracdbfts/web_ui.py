@@ -21,6 +21,7 @@ from trac.util.html import tag
 from trac.util.text import shorten_line
 from trac.util.translation import dgettext, tgettext_noop
 from trac.versioncontrol.api import NoSuchChangeset, RepositoryManager
+from trac.versioncontrol.cache import CachedRepository
 from trac.web.api import IRequestFilter
 from trac.web.chrome import Chrome, add_stylesheet
 
@@ -210,29 +211,43 @@ class TracDbftsSearchModule(Component):
         if not repos_map:
             return
 
-        with self.env.db_query as db:
-            cursor = db.cursor()
-            for reponame, repos in repos_map.iteritems():
-                repos_id = repos.params['id']
-                revs = [id_ for parent_id, id_ in entries
-                            if parent_id == reponame]
-                args = [repos_id]
+        def iter_cached(repos, revs):
+            with self.env.db_query as db:
+                cursor = db.cursor()
+                args = [repos.id]
                 args.extend(revs)
                 cursor.execute("""\
                     SELECT rev, time, author, message FROM revision
                     WHERE repos=%s AND rev IN ({0})
                     """.format(','.join(['%s'] * len(revs))), args)
-                for rev, ts, author, log in cursor:
+                for rev, ts, author, message in cursor:
                     try:
                         nrev = repos.normalize_rev(rev)
                         drev = repos.display_rev(nrev)
                     except NoSuchChangeset:
                         continue
-                    yield (entries[(reponame, rev)],
-                           req.href.changeset(nrev, reponame or None),
-                           '[%s]: %s' % (drev, shorten_line(log)),
-                           from_utimestamp(ts), author,
-                           shorten_result(log, terms))
+                    yield nrev, drev, rev, from_utimestamp(ts), author, message
+
+        def iter_direct(repos, revs):
+            for rev in revs:
+                try:
+                    cset = repos.get_changeset(rev)
+                    nrev = cset.rev
+                    drev = repos.display_rev(nrev)
+                except NoSuchChangeset:
+                    continue
+                yield nrev, drev, rev, cset.date, cset.author, cset.message
+
+        href_cset = req.href.changeset
+        for reponame, repos in repos_map.iteritems():
+            revs = [id_ for parent_id, id_ in entries if parent_id == reponame]
+            iter_ = iter_cached if isinstance(repos, CachedRepository) else \
+                    iter_direct
+            for nrev, drev, rev, date, author, message in iter_(repos, revs):
+                yield (entries[(reponame, rev)],
+                       href_cset(nrev, reponame or None),
+                       '[%s]: %s' % (drev, shorten_line(message)),
+                       date, author, shorten_result(message, terms))
 
     def _prepare_results_attachment(self, req, terms, results):
         entries = dict(((r.parent_realm, r.parent_id, r.id), idx)
