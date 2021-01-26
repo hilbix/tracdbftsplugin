@@ -14,7 +14,7 @@ from trac.attachment import Attachment
 from trac.core import Component, TracError, implements
 from trac.resource import ResourceNotFound
 from trac.ticket.model import Milestone, Ticket
-from trac.util.datefmt import from_utimestamp
+from trac.util.datefmt import format_datetime, from_utimestamp
 from trac.util.text import console_print, exception_to_unicode, print_table
 from trac.versioncontrol.api import (Changeset, NoSuchChangeset,
                                      RepositoryManager)
@@ -77,11 +77,16 @@ class TracDbftsCommandProvider(Component):
     def _do_search(self, *terms):
         mod = TracDbftsSystem(self.env)
         max_ = 20
-        header = ('realm', 'id', 'parent realm', 'parent id', 'score')
+        header = ('time', 'realm', 'id', 'parent realm', 'parent id', 'score')
         results = []
         n = 0
         for n, result in enumerate(mod.search(terms), 1):
             if n <= max_:
+                result = [
+                    format_datetime(result.time, '%Y-%m-%d %H:%M:%S.%f'),
+                    result.realm, result.id, result.parent_realm,
+                    result.parent_id, result.score and '%.3f' % result.score,
+                ]
                 results.append(result)
         print_table(results, header)
         print('%d matches' % n)
