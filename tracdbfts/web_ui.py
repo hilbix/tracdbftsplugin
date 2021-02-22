@@ -67,34 +67,34 @@ class TracDbftsSearchModule(Component):
     # Internal methods
 
     def _process_request(self, req):
-        search_mod = SearchModule(self.env)
-
-        query = req.args.getfirst('q')
-        terms = search_mod._parse_query(req, query) if query else None
+        search = SearchModule(self.env)
+        dbfts = TracDbftsSystem(self.env)
+        query = dbfts.parse(req.args.getfirst('q'))
 
         available_filters = []
-        for source in search_mod.search_sources:
+        for source in search.search_sources:
             available_filters.extend(source.get_search_filters(req) or [])
         available_filters.sort(key=lambda f: f[1].lower())
-        filters = search_mod._get_selected_filters(req, available_filters)
-        data = search_mod._prepare_data(req, query, available_filters, filters)
+        filters = search._get_selected_filters(req, available_filters)
+        data = search._prepare_data(req, query.query, available_filters,
+                                    filters)
 
-        if terms:
-            results = self._do_search(req, terms, filters)
+        if query.terms:
+            results = self._do_search(req, query, filters)
             if results:
-                data.update(search_mod._prepare_results(req, filters, results))
+                data.update(search._prepare_results(req, filters, results))
 
         add_stylesheet(req, 'common/css/search.css')
         return data
 
-    def _do_search(self, req, terms, filters):
+    def _do_search(self, req, query, filters):
         actions = {'wiki': 'WIKI_VIEW', 'ticket': 'TICKET_VIEW',
                    'milestone': 'MILESTONE_VIEW',
                    'changeset': 'CHANGESET_VIEW',
                    'attachment': 'ATTACHMENT_VIEW'}
         mod = TracDbftsSystem(self.env)
         results = []
-        for result in mod.search(terms, filters):
+        for result in mod.search(query, filters):
             action = actions[result.realm]
             if result.parent_realm:
                 res = Resource(result.parent_realm, result.parent_id) \
@@ -110,13 +110,13 @@ class TracDbftsSearchModule(Component):
                        self._prepare_results_milestone,
                        self._prepare_results_changeset,
                        self._prepare_results_attachment):
-            entries.extend(method(req, terms, results))
+            entries.extend(method(req, query, results))
         entries.sort(key=lambda entry: entry[0])
         for idx, entry in enumerate(entries):
             entries[idx] = entry[1:]
         return entries
 
-    def _prepare_results_wiki(self, req, terms, results):
+    def _prepare_results_wiki(self, req, query, results):
         wiki_realm = Resource('wiki')
         entries = dict((result.id, idx) for idx, result in enumerate(results)
                        if result.realm == 'wiki')
@@ -138,9 +138,9 @@ class TracDbftsSearchModule(Component):
                        get_resource_url(self.env, page, req.href),
                        '%s: %s' % (name, shorten_line(text)),
                        from_utimestamp(ts), author,
-                       shorten_result(text, terms))
+                       shorten_result(text, query.terms))
 
-    def _prepare_results_ticket(self, req, terms, results):
+    def _prepare_results_ticket(self, req, query, results):
         ticket_realm = Resource('ticket')
         entries = dict((int(result.id), idx)
                        for idx, result in enumerate(results)
@@ -168,9 +168,9 @@ class TracDbftsSearchModule(Component):
                                                   type_))
                 yield (entries[id_], req.href.ticket(id_), title,
                        from_utimestamp(ts), author,
-                       shorten_result(desc, terms))
+                       shorten_result(desc, query.terms))
 
-    def _prepare_results_milestone(self, req, terms, results):
+    def _prepare_results_milestone(self, req, query, results):
         milestone_realm = Resource('milestone')
         entries = dict((result.id, idx) for idx, result in enumerate(results)
                        if result.realm == 'milestone')
@@ -190,9 +190,9 @@ class TracDbftsSearchModule(Component):
                 yield (entries[name],
                        get_resource_url(self.env, milestone, req.href),
                        get_resource_name(self.env, milestone), dt, '',
-                       shorten_result(description, terms))
+                       shorten_result(description, query.terms))
 
-    def _prepare_results_changeset(self, req, terms, results):
+    def _prepare_results_changeset(self, req, query, results):
         entries = dict(((result.parent_id, result.id), idx)
                        for idx, result in enumerate(results)
                        if result.realm == 'changeset')
@@ -247,9 +247,9 @@ class TracDbftsSearchModule(Component):
                 yield (entries[(reponame, rev)],
                        href_cset(nrev, reponame or None),
                        '[%s]: %s' % (drev, shorten_line(message)),
-                       date, author, shorten_result(message, terms))
+                       date, author, shorten_result(message, query.terms))
 
-    def _prepare_results_attachment(self, req, terms, results):
+    def _prepare_results_attachment(self, req, query, results):
         entries = dict(((r.parent_realm, r.parent_id, r.id), idx)
                        for idx, r in enumerate(results)
                        if r.realm == 'attachment')
@@ -274,7 +274,7 @@ class TracDbftsSearchModule(Component):
                        get_resource_url(self.env, attachment, req.href),
                        get_resource_shortname(self.env, attachment),
                        from_utimestamp(ts), author,
-                       shorten_result(desc, terms))
+                       shorten_result(desc, query.terms))
 
 
 def dgettext_messages(*args, **kwargs):

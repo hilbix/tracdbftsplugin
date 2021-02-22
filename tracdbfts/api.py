@@ -26,6 +26,9 @@ from trac.wiki.api import IWikiChangeListener
 from trac.wiki.model import WikiPage
 
 
+__all__ = ('SearchQuery', 'SearchResult', 'TracDbftsSystem')
+
+
 class TracDbftsSystem(Component):
 
     implements(IEnvironmentSetupParticipant, IAttachmentChangeListener,
@@ -36,10 +39,18 @@ class TracDbftsSystem(Component):
 
     realms = ('wiki', 'ticket', 'milestone', 'changeset')
 
-    def search(self, terms, realms=None):
-        normalize = self._interface.normalize
-        terms = [normalize(term) for term in terms]
-        return self._interface.search(terms, realms or self.realms)
+    def parse(self, query):
+        return SearchQuery(query or '')
+
+    def search(self, query, realms=None):
+        if isinstance(query, unicode):
+            query = self.parse(query)
+            if query is None:
+                raise ValueError('No terms in query parameter')
+        if not isinstance(query, SearchQuery):
+            raise TypeError('Must be a SearchQuery instance or an unicode '
+                            'instance')
+        return self._interface.search(query, realms or self.realms)
 
     # IEnvironmentSetupParticipant methods
 
@@ -260,6 +271,88 @@ class TracDbftsSystem(Component):
         return u'\n\n'.join(dbnorm(_normalize(value)) for value in values)
 
 
+TOKEN_OR = list
+class TOKEN_NOT(unicode): pass
+
+
+class SearchQuery(object):
+
+    __slots__ = ('query', 'items', 'terms')
+
+    def __init__(self, query):
+        items = self._parse(query)
+        terms = {}
+        for item in items:
+            if isinstance(item, TOKEN_OR):
+                for v in item:
+                    if not isinstance(v, TOKEN_NOT):
+                        terms.setdefault(v, len(terms))
+            elif not isinstance(item, TOKEN_NOT):
+                terms.setdefault(item, len(terms))
+        terms = tuple(sorted(terms, key=lambda term: terms[term]))
+        self.query = query
+        self.items = items
+        self.terms = terms
+
+    _parse_re = re.compile(r"""
+        (?: \S+
+          | "[^"]*(?:"|\Z)
+          | '[^']*(?:'|\Z)
+        )
+    """, re.UNICODE | re.VERBOSE)
+
+    _normalize_re = re.compile(r'[\x00-\x1f\x7f]+')
+
+    def _parse(self, query):
+
+        def generate(query):
+            query = self._normalize_re.sub(' ', query)
+            for match in self._parse_re.finditer(query):
+                yield match.group(0)
+
+        def next_token(iterator):
+            while True:
+                try:
+                    token = next(iterator)
+                except StopIteration:
+                    return None
+                if token == 'OR':
+                    return TOKEN_OR
+                if token.startswith('-'):
+                    negative = True
+                    token = token[1:]
+                else:
+                    negative = False
+                if token.startswith('"'):
+                    token = token.strip('"')
+                elif token.endswith("'"):
+                    token = token.strip("'")
+                if token:
+                    return TOKEN_NOT(token) if negative else token
+
+        items = []
+        iterator = generate(query)
+        while True:
+            token = next_token(iterator)
+            if token is None:
+                break
+            if token is TOKEN_OR:
+                if not items:
+                    continue
+                while token is TOKEN_OR:
+                    token = next_token(iterator)
+                if token is None:
+                    break
+                last = items[-1]
+                if not isinstance(last, TOKEN_OR):
+                    items[-1] = last = [last]
+                last.append(token)
+                continue
+            items.append(token)
+
+        return [item[0] if isinstance(item, TOKEN_OR) and len(item) == 1 else
+                item for item in items]
+
 
 SearchResult = collections.namedtuple(
     'SearchResult', 'time realm id parent_realm parent_id score')
@@ -275,7 +368,7 @@ class DbftsInterface(object):
     def create_schema(self):
         raise NotImplementedError
 
-    def search(self, terms, realms):
+    def search(self, query, realms):
         raise NotImplementedError
 
     def normalize(self, values):
@@ -301,23 +394,13 @@ class MySQLDbftsInterface(DbftsInterface):
                     FULLTEXT KEY key_dbfts_content (content) WITH PARSER ngram)
                 """.format(charset))
 
-    def search(self, terms, realms):
-        def normalize(term):
-            term = normalize_re.sub(' ', term).strip()
-            if ' ' in term:
-                return '+"%s"*' % term
-            else:
-                return '+%s*' % term
-
-        if not isinstance(terms, (list, tuple)):
-            terms = [terms]
-        normalize_re = re.compile(r'["\s\x00-\x1f]+')
-        expr = ' '.join(normalize(term) for term in terms)
+    def search(self, query, realms):
+        query = self._build_query(query)
+        args = [query, query]
+        args.extend(realms)
+        args.extend(realms)
 
         with self.env.db_query as db:
-            args = [expr, expr]
-            args.extend(realms)
-            args.extend(realms)
             cursor = db.cursor()
             cursor.execute("""\
                 SELECT time, realm, id, parent_realm, parent_id,
@@ -332,6 +415,24 @@ class MySQLDbftsInterface(DbftsInterface):
 
     def normalize(self, value):
         return value
+
+    def _build_query(self, query):
+
+        def to_expr(item, or_=False):
+            if isinstance(item, TOKEN_OR):
+                expr = ' '.join(to_expr(v, or_=True) for v in item)
+                return '+( %s )' % expr
+            else:
+                negative = isinstance(item, TOKEN_NOT)
+                item = item.replace('"', ' ').strip()
+                item = ('%s*' if item[:1].isalnum() and ' ' not in item else
+                        '"%s"*') % item
+                if or_:
+                    return item
+                else:
+                    return ('-' if negative else '+') + item
+
+        return ' '.join(to_expr(item) for item in query.items)
 
 
 class PostgreSQLDbftsInterface(DbftsInterface):
@@ -355,27 +456,42 @@ class PostgreSQLDbftsInterface(DbftsInterface):
                     USING gin (content public.gin_bigm_ops)
                 """)
 
-    def search(self, terms, realms):
+    def search(self, query, realms):
         with self.env.db_query as db:
-            args = []
-            args.extend('%' + db.like_escape(term) + '%' for term in terms)
+            condition, args = self._build_query(query, db.like_escape)
             args.extend(realms)
             args.extend(realms)
             cursor = db.cursor()
             cursor.execute("""\
                 SELECT time, realm, id, parent_realm, parent_id, NULL AS score
                 FROM dbfts
-                WHERE {0} (realm IN ({1}) OR parent_realm IN ({1}))
+                WHERE {0} AND (realm IN ({1}) OR parent_realm IN ({1}))
                 ORDER BY time DESC
-                """.format(''.join("content LIKE %s ESCAPE '/' AND "
-                                   for idx in xrange(len(terms))),
-                           ','.join(['%s'] * len(realms))),
+                """.format(condition, ','.join(['%s'] * len(realms))),
                 args)
             for row in cursor:
                 yield SearchResult(*row)
 
     def normalize(self, value):
         return unicodedata.normalize('NFKC', value).lower()
+
+    def _build_query(self, query, like_escape):
+        exprs = []
+        args = []
+        for item in query.items:
+            if isinstance(item, TOKEN_OR):
+                exprs.append("(%s)" % ' OR '.join(["content LIKE %s ESCAPE "
+                                                   "'/'"] * len(item)))
+                args.extend(self.normalize(v) for v in item)
+            else:
+                if isinstance(item, TOKEN_NOT):
+                    exprs.append("content NOT LIKE %s ESCAPE '/'")
+                else:
+                    exprs.append("content LIKE %s ESCAPE '/'")
+                args.append(self.normalize(item))
+
+        args = ['%' + like_escape(arg) + '%' for arg in args]
+        return ' AND '.join(exprs), args
 
 
 class SQLiteDbftsInterface(DbftsInterface):
@@ -424,18 +540,13 @@ class SQLiteDbftsInterface(DbftsInterface):
                 END
                 """)
 
-    ctrl_re = re.compile(r'["\s\x00-\x1f]+')
-
-    def search(self, terms, realms):
-        def to_query(term):
-            term = self.ctrl_re.sub(' ', term).strip()
-            return '"%s"' % term
-        expr = ' AND '.join(to_query(self.normalize(term)) for term in terms)
+    def search(self, query, realms):
+        query = self._build_query(query)
+        args = [query]
+        args.extend(realms)
+        args.extend(realms)
 
         with self.env.db_query as db:
-            args = [expr]
-            args.extend(realms)
-            args.extend(realms)
             cursor = db.cursor()
             cursor.execute("""\
                 SELECT d.time, d.realm, d.id, d.parent_realm, d.parent_id, rank
@@ -449,6 +560,29 @@ class SQLiteDbftsInterface(DbftsInterface):
 
     def normalize(self, value):
         return unicodedata.normalize('NFKC', value)
+
+    def _build_query(self, query):
+
+        def to_expr(item, or_=False):
+            if isinstance(item, TOKEN_OR):
+                return '(%s)' % ' OR '.join(to_expr(v, or_=True) for v in item)
+            else:
+                negative = isinstance(item, TOKEN_NOT)
+                item = self.normalize(item).replace('"', ' ').strip()
+                if not item.isalnum() or item in ('AND', 'NOT', 'OR'):
+                    item = '"%s"' % item
+                if or_:
+                    return item
+                elif negative:
+                    return 'NOT %s' % item
+                else:
+                    return item
+
+        items = sorted(query.items,
+                       key=lambda item: isinstance(item, TOKEN_NOT))
+        exprs = [to_expr(item) for item in items]
+        return ' '.join(expr if idx == 0 or expr.startswith('NOT ') else
+                        'AND ' + expr for idx, expr in enumerate(exprs))
 
 
 def _build_hash(*values):

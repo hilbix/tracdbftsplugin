@@ -6,6 +6,7 @@
 # This software is licensed as described in the file COPYING, which
 # you should have received as part of this distribution.
 
+from time import time
 import os
 import sys
 
@@ -34,7 +35,7 @@ class TracDbftsCommandProvider(Component):
         yield ('dbfts index', '[realms...]',
                'Build fulltext index for resources',
                None, self._do_index)
-        yield ('dbfts search', 'terms...',
+        yield ('dbfts search', 'query',
                'Search resources using fulltext index',
                None, self._do_search)
 
@@ -74,13 +75,14 @@ class TracDbftsCommandProvider(Component):
                     print_stat(n, realm, newline=False)
                 print_stat(n, realm)
 
-    def _do_search(self, *terms):
+    def _do_search(self, query):
         mod = TracDbftsSystem(self.env)
         max_ = 20
         header = ('time', 'realm', 'id', 'parent realm', 'parent id', 'score')
         results = []
         n = 0
-        for n, result in enumerate(mod.search(terms), 1):
+        elapse = time()
+        for n, result in enumerate(mod.search(query), 1):
             if n <= max_:
                 result = [
                     format_datetime(result.time, '%Y-%m-%d %H:%M:%S.%f'),
@@ -88,8 +90,9 @@ class TracDbftsCommandProvider(Component):
                     result.parent_id, result.score and '%.3f' % result.score,
                 ]
                 results.append(result)
+        elapse = time() - elapse
         print_table(results, header)
-        print('%d matches' % n)
+        print('%d matches (%0.2f seconds)' % (n, elapse))
 
     def _iter_wikis(self):
         with self.env.db_query as db:
