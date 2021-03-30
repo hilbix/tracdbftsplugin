@@ -19,7 +19,7 @@ from trac.util.datefmt import format_datetime, from_utimestamp
 from trac.util.text import console_print, exception_to_unicode, print_table
 from trac.versioncontrol.api import (Changeset, NoSuchChangeset,
                                      RepositoryManager)
-from trac.versioncontrol.cache import CachedRepository
+from trac.versioncontrol.cache import CachedChangeset, CachedRepository
 from trac.wiki.model import WikiPage
 
 from tracdbfts.api import TracDbftsSystem
@@ -156,8 +156,8 @@ class TracDbftsCommandProvider(Component):
                     repos.normalize_rev(rev)
                 except NoSuchChangeset:
                     continue
-                yield Changeset(repos, rev, message, author,
-                                from_utimestamp(date))
+                yield PseudoChangeset(repos, rev, message, author,
+                                      from_utimestamp(date))
 
     def _iter_normal_csets(self, repos):
         try:
@@ -191,3 +191,11 @@ class TracDbftsCommandProvider(Component):
                 attachment = Attachment(self.env, row[0], row[1])
                 attachment._from_database(*row[2:])
                 yield attachment
+
+
+class PseudoChangeset(CachedChangeset):
+
+    def __init__(self, repos, rev, message, author, date):
+        if isinstance(repos, CachedRepository):
+            rev = repos.rev_db(rev)
+        Changeset.__init__(self, repos, rev, message, author, date)
