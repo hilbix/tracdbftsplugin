@@ -8,6 +8,7 @@
 
 from pkg_resources import parse_version
 import re
+import sys
 
 from trac import __version__
 from trac.core import Component, implements
@@ -26,6 +27,10 @@ from trac.web.api import IRequestFilter
 from trac.web.chrome import Chrome, add_stylesheet
 
 from tracdbfts.api import TracDbftsSystem
+
+
+if sys.version_info[0] != 2:
+    xrange = range
 
 
 _parsed_version = parse_version(__version__)

@@ -12,6 +12,7 @@ import collections
 import hashlib
 import re
 import unicodedata
+import sys
 
 from trac.attachment import IAttachmentChangeListener
 from trac.core import Component, implements
@@ -20,10 +21,20 @@ from trac.env import IEnvironmentSetupParticipant
 from trac.ticket.api import IMilestoneChangeListener, ITicketChangeListener
 from trac.util import lazy
 from trac.util.datefmt import to_utimestamp
+from trac.util.text import to_unicode
 from trac.versioncontrol.api import IRepositoryChangeListener
 from trac.versioncontrol.cache import CachedRepository
 from trac.wiki.api import IWikiChangeListener
 from trac.wiki.model import WikiPage
+
+
+if sys.version_info[0] != 2:
+    unicode = str
+    basestring = str
+    long = int
+    _inttypes = (int,)
+else:
+    _inttypes = (int, long)
 
 
 __all__ = ('SearchQuery', 'SearchResult', 'TracDbftsSystem')
@@ -199,9 +210,9 @@ class TracDbftsSystem(Component):
         if time is not None and isinstance(time, datetime):
             time = to_utimestamp(time)
         if id_ is not None and isinstance(id_, basestring):
-            id_ = unicode(id_)
+            id_ = to_unicode(id_)
         if parent_id is not None and isinstance(parent_id, basestring):
-            parent_id = unicode(parent_id)
+            parent_id = to_unicode(parent_id)
         self.env.db_transaction(stmt, (hash_, time, realm, id_, parent_realm,
                                        parent_id, content))
 
@@ -587,7 +598,7 @@ class SQLiteDbftsInterface(DbftsInterface):
 
 def _build_hash(*values):
     def to_b(value):
-        if isinstance(value, (int, long)):
+        if isinstance(value, _inttypes):
             return b'%d' % value
         if isinstance(value, bytes):
             return value
@@ -596,13 +607,13 @@ def _build_hash(*values):
         raise ValueError('Unrecognized value %r' % type(value))
     d = hashlib.sha1()
     d.update(b'\0'.join(to_b(value) for value in values))
-    return base64.b64encode(d.digest()).rstrip('=')
+    return base64.b64encode(d.digest()).rstrip(b'=')
 
 
 def _db_rev(cset):
     rev = cset.rev
     if isinstance(rev, basestring):
-        return rev
+        return to_unicode(rev)
     repos = cset.repos
     if isinstance(repos, CachedRepository):
         return repos.db_rev(rev)
