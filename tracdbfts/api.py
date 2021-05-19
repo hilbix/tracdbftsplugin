@@ -15,7 +15,7 @@ import unicodedata
 import sys
 
 from trac.attachment import IAttachmentChangeListener
-from trac.core import Component, implements
+from trac.core import Component, TracError, implements
 from trac.db.api import DatabaseManager
 from trac.env import IEnvironmentSetupParticipant
 from trac.ticket.api import IMilestoneChangeListener, ITicketChangeListener
@@ -510,6 +510,9 @@ class SQLiteDbftsInterface(DbftsInterface):
     def create_schema(self):
         with self.env.db_transaction as db:
             cursor = db.cursor()
+            cursor.execute("PRAGMA module_list")
+            if not any(row[0] == 'fts5' for row in cursor):
+                raise TracError("fts5 module unavailable")
             cursor.execute("""\
                 CREATE TABLE dbfts (
                     pkey            INTEGER PRIMARY KEY,
