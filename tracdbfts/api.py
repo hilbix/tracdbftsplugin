@@ -513,6 +513,12 @@ class SQLiteDbftsInterface(DbftsInterface):
             cursor.execute("PRAGMA module_list")
             if not any(row[0] == 'fts5' for row in cursor):
                 raise TracError("fts5 module unavailable")
+            cursor.execute("DROP TABLE IF EXISTS dbfts_idx")
+            cursor.execute("""\
+                CREATE VIRTUAL TABLE dbfts_idx
+                    USING fts5(content, tokenize=trigram,
+                               content=dbfts, content_rowid=pkey)
+                """)
             cursor.execute("""\
                 CREATE TABLE dbfts (
                     pkey            INTEGER PRIMARY KEY,
@@ -524,15 +530,9 @@ class SQLiteDbftsInterface(DbftsInterface):
                     parent_id       TEXT,
                     content         TEXT)
                 """)
-            cursor.execute("DROP TABLE IF EXISTS dbfts_idx")
             cursor.execute("DROP TRIGGER IF EXISTS dbfts_insert")
             cursor.execute("DROP TRIGGER IF EXISTS dbfts_insert")
             cursor.execute("DROP TRIGGER IF EXISTS dbfts_delete")
-            cursor.execute("""\
-                CREATE VIRTUAL TABLE dbfts_idx
-                    USING fts5(content, tokenize=trigram,
-                               content=dbfts, content_rowid=pkey)
-                """)
             cursor.execute("""\
                 CREATE TRIGGER dbfts_insert AFTER INSERT ON dbfts BEGIN
                     INSERT INTO dbfts_idx (rowid, content)
