@@ -130,14 +130,7 @@ class TracDbftsCommandProvider(Component):
 
     def _iter_changesets(self):
         manager = RepositoryManager(self.env)
-        for reponame in manager.get_all_repositories():
-            try:
-                repos = manager.get_repository(reponame)
-            except TracError as e:
-                self.log.warning('Exception caught from RepositoryManager.'
-                                 'get_repository(%r): %s',
-                                 reponame, exception_to_unicode(e))
-                continue
+        for repos in manager.get_real_repositories():
             iter_csets = self._iter_cached_csets \
                          if isinstance(repos, CachedRepository) else \
                          self._iter_normal_csets
