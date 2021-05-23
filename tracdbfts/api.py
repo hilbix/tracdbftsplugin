@@ -630,8 +630,8 @@ _spaces_re = re.compile(r'\s+')
 def _normalize(value):
     if value is None:
         return u''
-    if isinstance(value, (int, long)):
-        return unicode(value)
+    if isinstance(value, _inttypes):
+        return u'%d' % value
     if isinstance(value, bytes):
         try:
             value = unicode(value, 'utf-8')
