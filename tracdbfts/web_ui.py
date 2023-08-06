@@ -244,7 +244,7 @@ class TracDbftsSearchModule(Component):
                 yield nrev, drev, rev, cset.date, cset.author, cset.message
 
         href_cset = req.href.changeset
-        for reponame, repos in repos_map.iteritems():
+        for reponame, repos in repos_map.items():
             revs = [id_ for parent_id, id_ in entries if parent_id == reponame]
             iter_ = iter_cached if isinstance(repos, CachedRepository) else \
                     iter_direct
