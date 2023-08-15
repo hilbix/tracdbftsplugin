@@ -12,7 +12,7 @@ from setuptools import setup, find_packages
 def main():
     kwargs = {
         'name': 'TracDbftsPlugin',
-        'version': '1.0.0.0',
+        'version': '1.0.0.1',
         'description': 'Provide search feature using database fulltext index',
         'license': 'BSD',  # the same as Trac
         'url': 'http://trac-hacks.org/wiki/TracDbftsPlugin',
