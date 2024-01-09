@@ -562,13 +562,14 @@ class SQLiteDbftsInterface(DbftsInterface):
 
         with self.env.db_query as db:
             cursor = db.cursor()
-            cursor.execute("""\
+            cmd = """\
                 SELECT d.time, d.realm, d.id, d.parent_realm, d.parent_id, rank
                 FROM dbfts AS d, dbfts_idx AS i
                 WHERE i.content MATCH %s AND d.pkey=i.rowid
                 AND (d.realm IN ({0}) OR d.parent_realm IN ({0}))
                 ORDER BY rank
-                """.format(','.join(['%s'] * len(realms))), args)
+                """.format(','.join(['%s'] * len(realms)))
+            cursor.execute(cmd, args)
             for row in cursor:
                 yield SearchResult(*row)
 
